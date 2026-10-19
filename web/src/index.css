@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens — the single source of truth for color. Light is the default;
+   `.dark` on <html> switches to the dark palette. Self-hosted system fonts only,
+   no third-party font requests. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef1f4;
+  --border: #d5dae0;
+  --text: #15181c;
+  --text-muted: #525a63;
+  --text-subtle: #808a94;
+
+  --brand: #0b6b5b;
+  --brand-contrast: #ffffff;
+
+  --confirmed: #0f7a4d;
+  --confirmed-bg: #dcf3e7;
+  --provisional: #9a6b00;
+  --provisional-bg: #fbf0d2;
+  --disputed: #b3261e;
+  --disputed-bg: #fbdddb;
+
+  --realized: #15181c;
+  --accrued: #808a94;
+}
+
+.dark {
+  --bg: #0f1216;
+  --surface: #171b21;
+  --surface-2: #1f242c;
+  --border: #2c333c;
+  --text: #eef1f4;
+  --text-muted: #a3adb8;
+  --text-subtle: #6c7681;
+
+  --brand: #2fb89b;
+  --brand-contrast: #06130f;
+
+  --confirmed: #4ad295;
+  --confirmed-bg: #10301f;
+  --provisional: #e7b84d;
+  --provisional-bg: #33290c;
+  --disputed: #f0756b;
+  --disputed-bg: #3a1512;
+
+  --realized: #eef1f4;
+  --accrued: #6c7681;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Always-visible focus ring for keyboard users (WCAG 2.4.7). */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Right-aligned, tabular figures for money columns. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}

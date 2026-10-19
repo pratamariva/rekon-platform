@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Env / secrets — never commit real values (.env.example is committed)
+.env
+.env.*
+!.env.example
+
+# Prisma local
+*.db
+*.sqlite
+
+# Tooling noise (not part of this project)
+.claude-flow/
+ruvector.db
+.DS_Store
+*.log

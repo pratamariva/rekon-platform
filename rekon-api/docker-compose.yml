@@ -1,0 +1,17 @@
+# Local Postgres for development. HARDEN: do not use these credentials in prod;
+# use a managed Postgres (e.g. Neon) with TLS, backups, and least-privilege roles.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rekon
+      POSTGRES_PASSWORD: rekon
+      POSTGRES_DB: rekon
+    ports:
+      - "5432:5432"
+    volumes:
+      - rekon_pgdata:/var/lib/postgresql/data
+
+volumes:
+  rekon_pgdata:

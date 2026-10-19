@@ -1,0 +1,496 @@
+// Rekon — royalty accounting schema. SCAFFOLD, not production-ready.
+// HARDEN: append-only tables (AuditEntry, *Posting, Remittance, ReconAllocation) are
+// enforced only in application code here. Before prod, enforce immutability at the DB
+// level with triggers/rules that reject UPDATE/DELETE, and consider row-level security
+// for tenant isolation as defence-in-depth behind the app-level assertTenant checks.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlanTier {
+  free
+  indie
+  label
+  publisher
+  enterprise
+}
+
+enum CurrencyCode {
+  IDR
+  USD
+  EUR
+  SGD
+  THB
+  MYR
+}
+
+enum Role {
+  admin
+  payee
+}
+
+enum PayoutRail {
+  bank_transfer
+  paynow
+}
+
+enum PortalStatus {
+  invited
+  active
+}
+
+enum SplitRole {
+  artist
+  producer
+  writer
+  featured
+  mixer
+  label
+}
+
+enum ContractLevel {
+  release
+  track
+  item
+  transaction
+}
+
+enum SplitLevel {
+  track
+  release
+}
+
+enum StatementStatus {
+  draft
+  issued
+  disputed
+}
+
+enum ReconStatus {
+  unpaid
+  provisional
+  confirmed
+  disputed
+}
+
+enum MatchTier {
+  deterministic
+  probabilistic
+  manual
+}
+
+enum PayoutStatus {
+  due
+  processing
+  paid
+  failed
+}
+
+enum TxnType {
+  income
+  expense
+  transfer
+}
+
+model Tenant {
+  id                  String       @id @default(cuid())
+  name                String
+  functionalCurrency  CurrencyCode
+  plan                PlanTier     @default(indie)
+  referenceRateSource String       @default("manual")
+  createdAt           DateTime     @default(now())
+
+  users                User[]
+  payees               Payee[]
+  artists              Artist[]
+  releases             Release[]
+  items                Item[]
+  contracts            Contract[]
+  contractAssignments  ContractAssignment[]
+  ledgers              Ledger[]
+  statements           Statement[]
+  exceptions           Exception[]
+  payouts              Payout[]
+  manualTransactions   ManualTransaction[]
+  auditEntries         AuditEntry[]
+  referenceRates       ReferenceRate[]
+  legacySplits         Split[]
+}
+
+model User {
+  id               String    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id])
+  email            String
+  passwordHash     String?
+  role             Role      @default(admin)
+  emailVerified    Boolean   @default(false)
+  twoFactorEnabled Boolean   @default(false)
+  consentAt        DateTime?
+  payeeId          String?   @unique
+  payee            Payee?    @relation(fields: [payeeId], references: [id])
+  inviteTokenHash  String?   @unique
+  inviteExpiresAt  DateTime?
+  claimedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  sessions Session[]
+  audits   AuditEntry[] @relation("ActorAudits")
+
+  @@unique([tenantId, email])
+}
+
+// Lucia session.
+model Session {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+}
+
+model Payee {
+  id              String       @id @default(cuid())
+  tenantId        String
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  name            String
+  displayCurrency CurrencyCode
+  payoutRail      PayoutRail   @default(bank_transfer)
+  portalStatus    PortalStatus @default(invited)
+  createdAt       DateTime     @default(now())
+
+  user           User?
+  contractSplits ContractSplit[]
+  balances       PayeeBalance[]
+  payouts        Payout[]
+  participations StatementParticipant[]
+  txnPostings    TxnPosting[]
+  transactions   ManualTransaction[]
+}
+
+model Artist {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String
+  aliasOfId String?
+  aliasOf   Artist?  @relation("Alias", fields: [aliasOfId], references: [id])
+  aliases   Artist[] @relation("Alias")
+
+  releases Release[]
+}
+
+model Release {
+  id         String  @id @default(cuid())
+  tenantId   String
+  tenant     Tenant  @relation(fields: [tenantId], references: [id])
+  title      String
+  artworkUrl String?
+  catalogNo  String?
+  artistId   String?
+  artist     Artist? @relation(fields: [artistId], references: [id])
+
+  tracks      Track[]
+  items       Item[]
+  assignments ContractAssignment[]
+}
+
+model Track {
+  id         String  @id @default(cuid())
+  releaseId  String
+  release    Release @relation(fields: [releaseId], references: [id])
+  title      String
+  isrc       String?
+  artworkUrl String?
+
+  items          Item[]
+  assignments    ContractAssignment[]
+  statementLines StatementLine[]
+}
+
+model Item {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  metaKey     String
+  source      String
+  artist      String?
+  releaseName String?
+  trackName   String?
+  isrc        String?
+  upc         String?
+  catalogNo   String?
+  trackId     String?
+  track       Track?   @relation(fields: [trackId], references: [id])
+  releaseId   String?
+  release     Release? @relation(fields: [releaseId], references: [id])
+  createdAt   DateTime @default(now())
+
+  assignments    ContractAssignment[]
+  statementLines StatementLine[]
+
+  @@unique([tenantId, source, metaKey])
+}
+
+model Contract {
+  id          String  @id @default(cuid())
+  tenantId    String
+  tenant      Tenant  @relation(fields: [tenantId], references: [id])
+  name        String
+  documentUrl String?
+  createdAt   DateTime @default(now())
+
+  splits      ContractSplit[]
+  assignments ContractAssignment[]
+}
+
+model ContractSplit {
+  id         String    @id @default(cuid())
+  contractId String
+  contract   Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  payeeId    String
+  payee      Payee     @relation(fields: [payeeId], references: [id])
+  role       SplitRole
+  shareBp    Int // basis points, 0..10000
+  ledgerId   String?
+  ledger     Ledger?   @relation(fields: [ledgerId], references: [id])
+}
+
+model ContractAssignment {
+  id            String        @id @default(cuid())
+  tenantId      String
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  level         ContractLevel
+  contractId    String
+  contract      Contract      @relation(fields: [contractId], references: [id])
+  releaseId     String?       @unique
+  release       Release?      @relation(fields: [releaseId], references: [id])
+  trackId       String?       @unique
+  track         Track?        @relation(fields: [trackId], references: [id])
+  itemId        String?       @unique
+  item          Item?         @relation(fields: [itemId], references: [id])
+  transactionId String?       @unique
+  transaction   ManualTransaction? @relation(fields: [transactionId], references: [id])
+}
+
+model Ledger {
+  id       String  @id @default(cuid())
+  tenantId String
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  name     String
+
+  balances       PayeeBalance[]
+  contractSplits ContractSplit[]
+  payoutPostings PayoutPosting[]
+  txnPostings    TxnPosting[]
+
+  @@unique([tenantId, name])
+}
+
+model PayeeBalance {
+  id          String       @id @default(cuid())
+  payeeId     String
+  payee       Payee        @relation(fields: [payeeId], references: [id])
+  ledgerId    String?
+  ledger      Ledger?      @relation(fields: [ledgerId], references: [id])
+  currency    CurrencyCode
+  amountMinor BigInt       @default(0)
+
+  @@unique([payeeId, ledgerId, currency])
+}
+
+// Legacy — kept ONLY as the input shape consumed by contracts.recommendRelease.
+// HARDEN: removable. Not wired into the ledger/posting model.
+model Split {
+  id       String       @id @default(cuid())
+  tenantId String
+  tenant   Tenant       @relation(fields: [tenantId], references: [id])
+  level    SplitLevel
+  name     String
+  shares   SplitShare[]
+}
+
+model SplitShare {
+  id      String @id @default(cuid())
+  splitId String
+  split   Split  @relation(fields: [splitId], references: [id], onDelete: Cascade)
+  payeeId String
+  shareBp Int
+}
+
+model Statement {
+  id       String          @id
+  tenantId String
+  tenant   Tenant          @relation(fields: [tenantId], references: [id])
+  title    String
+  period   String
+  status   StatementStatus @default(draft)
+  issuedAt DateTime?
+  createdAt DateTime       @default(now())
+
+  lines        StatementLine[]
+  participants StatementParticipant[]
+  remittances  Remittance[]
+  payouts      Payout[]
+}
+
+model StatementLine {
+  id                 String       @id @default(cuid())
+  statementId        String
+  statement          Statement    @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  itemId             String?
+  item               Item?        @relation(fields: [itemId], references: [id])
+  trackId            String?
+  track              Track?       @relation(fields: [trackId], references: [id])
+  source             String
+  revenueType        String
+  nativeCurrency     CurrencyCode
+  nativeAmountMinor  BigInt
+  realizedMinor      BigInt?
+  reconStatus        ReconStatus  @default(unpaid)
+  resolvedContractId String?
+
+  allocations ReconAllocation[]
+}
+
+model StatementParticipant {
+  id                     String    @id @default(cuid())
+  statementId            String
+  statement              Statement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  payeeId                String
+  payee                  Payee     @relation(fields: [payeeId], references: [id])
+  shareFunctionalMinor   BigInt
+
+  @@unique([statementId, payeeId])
+}
+
+model Remittance {
+  id                  String       @id @default(cuid())
+  statementId         String?
+  statement           Statement?   @relation(fields: [statementId], references: [id])
+  receivedCurrency    CurrencyCode
+  receivedAmountMinor BigInt
+  paymentReference    String?
+  receivedAt          DateTime     @default(now())
+
+  allocations ReconAllocation[]
+}
+
+model ReconAllocation {
+  id              String        @id @default(cuid())
+  remittanceId    String
+  remittance      Remittance    @relation(fields: [remittanceId], references: [id])
+  statementLineId String
+  statementLine   StatementLine @relation(fields: [statementLineId], references: [id])
+  allocatedMinor  BigInt
+  tier            MatchTier     @default(deterministic)
+}
+
+model Exception {
+  id       String   @id @default(cuid())
+  tenantId String
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  kind     String
+  detail   String
+  resolved Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Payout {
+  id                  String       @id @default(cuid())
+  tenantId            String
+  tenant              Tenant       @relation(fields: [tenantId], references: [id])
+  payeeId             String
+  payee               Payee        @relation(fields: [payeeId], references: [id])
+  statementId         String?
+  statement           Statement?   @relation(fields: [statementId], references: [id])
+  grossFunctionalMinor BigInt
+  payoutCurrency      CurrencyCode
+  payoutAmountMinor   BigInt
+  realizedRate        String
+  rail                PayoutRail
+  status              PayoutStatus @default(due)
+  proofUrl            String?
+  paidAt              DateTime?
+  createdAt           DateTime     @default(now())
+
+  postings PayoutPosting[]
+}
+
+model PayoutPosting {
+  id          String       @id @default(cuid())
+  payoutId    String
+  payout      Payout       @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  ledgerId    String?
+  ledger      Ledger?      @relation(fields: [ledgerId], references: [id])
+  currency    CurrencyCode
+  amountMinor BigInt // negative = debit against the ledger balance
+}
+
+model ManualTransaction {
+  id          String       @id @default(cuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  type        TxnType
+  currency    CurrencyCode
+  amountMinor BigInt // always positive; sign is applied by posting logic
+  occurredAt  DateTime     @default(now())
+  memo        String?
+  releaseId   String?
+  trackId     String?
+  itemId      String?
+  payeeId     String?
+  payee       Payee?       @relation(fields: [payeeId], references: [id])
+  ledgerId    String?
+  reversesId  String?            @unique
+  reverses    ManualTransaction? @relation("Reversal", fields: [reversesId], references: [id])
+  reversedBy  ManualTransaction? @relation("Reversal")
+  voidedAt    DateTime?
+  createdAt   DateTime     @default(now())
+
+  postings    TxnPosting[]
+  assignment  ContractAssignment?
+}
+
+model TxnPosting {
+  id            String            @id @default(cuid())
+  transactionId String
+  transaction   ManualTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  payeeId       String
+  payee         Payee             @relation(fields: [payeeId], references: [id])
+  ledgerId      String?
+  ledger        Ledger?           @relation(fields: [ledgerId], references: [id])
+  currency      CurrencyCode
+  amountMinor   BigInt // signed
+}
+
+model AuditEntry {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  actorId   String
+  actor     User     @relation("ActorAudits", fields: [actorId], references: [id])
+  at        DateTime @default(now())
+  action    String
+  recordId  String
+  messageEn String
+  messageId String // Bahasa Indonesia message (field name = "message, Indonesian")
+}
+
+model ReferenceRate {
+  id     String       @id @default(cuid())
+  tenantId String
+  tenant   Tenant     @relation(fields: [tenantId], references: [id])
+  base   CurrencyCode
+  quote  CurrencyCode
+  rate   String // decimal string; parsed with decimal.js. Never a float column.
+  source String
+  asOf   DateTime
+
+  @@unique([tenantId, base, quote, asOf])
+}
