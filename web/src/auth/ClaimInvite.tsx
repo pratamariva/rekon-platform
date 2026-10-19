@@ -76,8 +76,8 @@ export function ClaimInvite() {
             className="mt-1"
           />
           <span className="text-text-muted">
-            I consent to the processing of my personal data in accordance with Indonesia's
-            Personal Data Protection Law (UU PDP).
+            I agree to the Privacy Policy and consent to the processing of my personal data as
+            described there.
           </span>
         </label>
 
